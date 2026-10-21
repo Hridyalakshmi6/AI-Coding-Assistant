@@ -6,14 +6,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
-
+import os
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MCP_URL = "http://127.0.0.1:8000/mcp"
-
+MCP_URL = os.environ.get(
+    "MCP_URL",
+    "http://127.0.0.1:8000/mcp"
+)
 app = FastAPI(title="DevFlow API")
 
 app.add_middleware(
@@ -82,3 +84,12 @@ async def explain(request: ExplainRequest):
             status_code=502,
             detail=f"MCP tool call failed: {exc}",
         ) from exc
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "10000")),
+    )
