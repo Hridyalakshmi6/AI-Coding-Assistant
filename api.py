@@ -17,14 +17,8 @@ MCP_URL = os.environ.get(
     "http://127.0.0.1:8000/mcp"
 )
 app = FastAPI(title="DevFlow API")
-/*
-_cors_origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://devflow-frontend-4o1o.onrender.com",
-]*/
 
-allow_origins=[
+_cors_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://devflow-frontend-4o1o.onrender.com",
