@@ -58,7 +58,7 @@ async def explain(request: ExplainRequest):
         async with streamable_http_client(MCP_URL) as (
             read_stream,
             write_stream,
-            ):
+        ):
             async with ClientSession(
                 read_stream, write_stream
             ) as session:
@@ -85,6 +85,15 @@ async def explain(request: ExplainRequest):
 
     except HTTPException:
         raise
+    except BaseExceptionGroup as eg:
+        # Unwrap TaskGroup errors from the MCP SDK's async internals
+        causes = eg.exceptions
+        real_exc = causes[0] if causes else eg
+        logger.exception("MCP TaskGroup error (unwrapped): %s", real_exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"MCP tool call failed: {real_exc}",
+        ) from real_exc
     except Exception as exc:
         logger.exception("MCP tool call failed")
         raise HTTPException(
