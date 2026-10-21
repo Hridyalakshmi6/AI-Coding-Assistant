@@ -21,7 +21,7 @@ app = FastAPI(title="DevFlow API")
 _cors_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://devflow-frontend-4o1o.onrender.com",
+    "https://devflow-frontend-401o.onrender.com",
 ]
 
 _frontend_url = os.environ.get("FRONTEND_URL", "")
