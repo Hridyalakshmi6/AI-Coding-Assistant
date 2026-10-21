@@ -7,6 +7,14 @@ ERROR_GUIDES = {
     "keyerror": "Python could not find the requested key in a dictionary.",
     "zerodivisionerror": "Python attempted to divide a number by zero.",
     "syntaxerror": "The code contains invalid Python syntax.",
+    "arrayindexoutofboundsexception": (
+        "Java accessed an array position that does not exist. "
+        "Check the array length and index."
+    ),
+    "indexoutofboundsexception": (
+        "Java accessed an invalid array or collection index. "
+        "Check the index against the valid range."
+    ),
 }
 
 
