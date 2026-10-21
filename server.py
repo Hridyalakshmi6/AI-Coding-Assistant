@@ -3,47 +3,42 @@ from mcp.server.mcpserver import MCPServer
 
 mcp = MCPServer("DevFlow")
 
+ERROR_GUIDES = {
+    "keyerror": "Python could not find the requested key in a dictionary.",
+    "zerodivisionerror": "Python attempted to divide a number by zero.",
+    "syntaxerror": "The code contains invalid Python syntax.",
+}
+
 
 @mcp.tool()
 def explain_error(error_message: str) -> str:
     """Explain a programming error and suggest debugging steps."""
 
+    if not error_message or not error_message.strip():
+        return (
+            "Please enter an error message or traceback "
+            "so DevFlow can help diagnose the problem."
+        )
+
     error = error_message.lower()
 
-    if "nullpointerexception" in error:
-        return (
-            "A NullPointerException occurs when Java code tries "
-            "to use an object reference that is null. "
-            "Check where the object is initialized and add a "
-            "null check before using it."
-        )
-
-    if "indexoutofboundsexception" in error:
-        return (
-            "An IndexOutOfBoundsException means your code is "
-            "accessing an invalid list or array index. "
-            "Check the index and ensure it is within valid bounds."
-        )
-
-    if "syntaxerror" in error or "syntax error" in error:
-        return (
-            "A SyntaxError means the code does not follow the "
-            "language's syntax rules. Check brackets, quotes, "
-            "colons, and spelling."
-        )
-
-    if "indentationerror" in error:
-        return (
-            "An IndentationError means Python indentation is "
-            "incorrect. Check spaces and indentation levels."
-        )
+    for error_name, explanation in ERROR_GUIDES.items():
+        if error_name in error:
+            return (
+                f"Error detected: {error_name}\n"
+                f"Explanation and fix: {explanation}\n"
+                "Next step: Check the traceback, locate the failing "
+                "line, and reproduce the issue with a small test."
+            )
 
     return (
         f"Error received: {error_message}\n"
-        "Start by reading the full traceback, identifying the "
-        "line where the error occurs, checking variable values, "
-        "and reproducing the issue with a small test."
+        "DevFlow could not identify this error specifically yet. "
+        "Read the full traceback, find the failing line, check "
+        "variable values and types, and reproduce the issue "
+        "with a small test."
     )
+
 
 
 if __name__ == "__main__":
