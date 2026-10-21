@@ -68,15 +68,18 @@ function App() {
     setResult(null);
 
     try {
-      const response = await fetch("http://127.0.0.1:8001/api/explain", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          error_message: errorMessage,
-        }),
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/explain`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error_message: errorMessage,
+          }),
+        }
+      );
 
       const data = await response.json();
 
