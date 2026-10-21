@@ -1,7 +1,8 @@
 
 from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from mcp import ClientSession
@@ -16,7 +17,6 @@ MCP_URL = os.environ.get(
     "MCP_URL",
     "http://127.0.0.1:8000/mcp"
 )
-app = FastAPI(title="DevFlow API")
 
 _cors_origins = [
     "http://localhost:5173",
@@ -27,6 +27,21 @@ _cors_origins = [
 _frontend_url = os.environ.get("FRONTEND_URL", "")
 if _frontend_url:
     _cors_origins.append(_frontend_url)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Open one MCP session for the lifetime of the API process."""
+    async with streamable_http_client(MCP_URL) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            logger.info("MCP session initialized against %s", MCP_URL)
+            app.state.mcp_session = session
+            yield
+    logger.info("MCP session closed.")
+
+
+app = FastAPI(title="DevFlow API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,46 +62,38 @@ async def health():
 
 
 @app.post("/api/explain")
-async def explain(request: ExplainRequest):
-    if not request.error_message.strip():
+async def explain(request_body: ExplainRequest, request: Request):
+    if not request_body.error_message.strip():
         raise HTTPException(
             status_code=400,
             detail="Please enter an error message.",
         )
 
+    session: ClientSession = request.app.state.mcp_session
+
     try:
-        async with streamable_http_client(MCP_URL) as (
-            read_stream,
-            write_stream,
-        ):
-            async with ClientSession(
-                read_stream, write_stream
-            ) as session:
-                await session.initialize()
+        result = await session.call_tool(
+            "explain_error",
+            {"error_message": request_body.error_message},
+        )
 
-                result = await session.call_tool(
-                    "explain_error",
-                    {"error_message": request.error_message},
-                )
+        if result.is_error:
+            raise HTTPException(
+                status_code=502,
+                detail="The MCP tool could not process this error.",
+            )
 
-                if result.is_error:
-                    raise HTTPException(
-                        status_code=502,
-                        detail="The MCP tool could not process this error.",
-                    )
+        explanation = "\n".join(
+            item.text
+            for item in result.content
+            if getattr(item, "text", None)
+        )
 
-                explanation = "\n".join(
-                    item.text
-                    for item in result.content
-                    if getattr(item, "text", None)
-                )
-
-                return {"explanation": explanation}
+        return {"explanation": explanation}
 
     except HTTPException:
         raise
     except BaseExceptionGroup as eg:
-        # Unwrap TaskGroup errors from the MCP SDK's async internals
         causes = eg.exceptions
         real_exc = causes[0] if causes else eg
         logger.exception("MCP TaskGroup error (unwrapped): %s", real_exc)
@@ -100,6 +107,7 @@ async def explain(request: ExplainRequest):
             status_code=502,
             detail=f"MCP tool call failed: {exc}",
         ) from exc
+
 
 if __name__ == "__main__":
     import uvicorn
