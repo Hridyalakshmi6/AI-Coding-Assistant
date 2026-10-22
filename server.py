@@ -1,5 +1,6 @@
 import os
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 mcp = MCPServer("DevFlow")
 
@@ -48,12 +49,21 @@ def explain_error(error_message: str) -> str:
     )
 
 
-
 if __name__ == "__main__":
+    import os
+
     port = int(os.environ.get("PORT", "8000"))
 
     mcp.run(
         transport="streamable-http",
         host="0.0.0.0",
         port=port,
+        transport_security=TransportSecuritySettings(
+            allowed_hosts=[
+                "ai-coding-assistant-d230.onrender.com",
+            ],
+            allowed_origins=[
+                "https://ai-coding-assistant-1-1sfr.onrender.com",
+            ],
+        ),
     )
