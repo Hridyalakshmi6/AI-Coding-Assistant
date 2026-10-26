@@ -54,16 +54,24 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", "8000"))
 
+    is_local = os.environ.get("ENV", "local") == "local"
+
+    security_settings = None if is_local else TransportSecuritySettings(
+        allowed_hosts=[
+            "localhost",
+            "127.0.0.1",
+            "ai-coding-assistant-d230.onrender.com",
+        ],
+        allowed_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "https://ai-coding-assistant-1-1sfr.onrender.com",
+        ],
+    )
+
     mcp.run(
         transport="streamable-http",
         host="0.0.0.0",
         port=port,
-        transport_security=TransportSecuritySettings(
-            allowed_hosts=[
-                "ai-coding-assistant-d230.onrender.com",
-            ],
-            allowed_origins=[
-                "https://ai-coding-assistant-1-1sfr.onrender.com",
-            ],
-        ),
+        transport_security=security_settings,
     )
