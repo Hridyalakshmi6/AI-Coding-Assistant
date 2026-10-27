@@ -55,52 +55,67 @@ function App() {
   const [errorMessage, setErrorMessage] = useState("");
   const [result, setResult] = useState(null);
   const [notice, setNotice] = useState("");
+  const [loading, setLoading] = useState(false);
 
 
-  async function explainError() {
-    if (!errorMessage.trim()) {
-      setNotice("Paste an error message first.");
-      setResult(null);
-      return;
-    }
+  
+async function explainError() {
+  if (loading) return;
 
-    setNotice("");
+  if (!errorMessage.trim()) {
+    setNotice("Paste an error message first.");
     setResult(null);
+    return;
+  }
 
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/explain`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            error_message: errorMessage,
-          }),
-        }
-      );
+  setLoading(true);
+  setNotice("");
+  setResult(null);
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.detail || "Could not explain this error.");
+  try {
+    const response = await fetch(
+      `${import.meta.env.VITE_API_URL}/api/explain`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error_message: errorMessage.trim(),
+        }),
       }
+    );
 
-      setResult({
-        type: data.explanation.match(/Error detected:\s*([^\n]+)/)?.[1] || "MCP analysis",
-        description: data.explanation
-          .match(/Explanation and fix:\s*([\s\S]*?)(?=\nNext step:|$)/)?.[1]
-          || data.explanation,
-        fix: data.explanation.match(/Next step:\s*([\s\S]*)/)?.[1]
-          || "Review the traceback and test the change.",
-      });
-    } catch (error) {
-      setNotice(
-        error.message || "Could not connect to DevFlow. Check that both backend services are running."
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Could not explain this error. Please try again later."
       );
     }
+
+    setResult({
+      type:
+        data.explanation.match(/Error detected:\s*([^\n]+)/)?.[1] ||
+        "MCP analysis",
+      description:
+        data.explanation.match(
+          /Explanation and fix:\s*([\s\S]*?)(?=\nNext step:|$)/
+        )?.[1] || data.explanation,
+      fix:
+        data.explanation.match(/Next step:\s*([\s\S]*)/)?.[1] ||
+        "Review the traceback and test the change.",
+    });
+  } catch (error) {
+    setNotice(
+      error.message ||
+        "Could not connect to DevFlow. Please try again later."
+    );
+  } finally {
+    setLoading(false);
   }
+}
+
 
   function selectExample(value) {
     setErrorMessage(value);
@@ -206,9 +221,16 @@ function App() {
             ))}
           </div>
 
-          <button className="explain-button" onClick={explainError}>
-            Explain this error <span>→</span>
-          </button>
+          
+<button
+  className="explain-button"
+  onClick={explainError}
+  disabled={loading}
+>
+  {loading ? "Analyzing error..." : "Explain this error"}
+  {!loading && <span> →</span>}
+</button>
+
 
           <div className="results-section">
             <div className="section-heading">
