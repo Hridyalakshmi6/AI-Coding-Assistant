@@ -2,8 +2,6 @@
 import asyncio
 import logging
 import os
-from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -114,8 +112,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # --------------------------------------------------
 
 app = FastAPI(
-    title="DevFlow API",
-    lifespan=lifespan,
+    title="DevFlow API"
 )
 
 app.add_middleware(
@@ -158,73 +155,55 @@ async def health():
 # Explain error endpoint
 # --------------------------------------------------
 
-@app.post("/api/explain")
-async def explain(
-    request_body: ExplainRequest,
-    request: Request,
-):
-    error_message = request_body.error_message.strip()
 
-    if not error_message:
+@app.post("/api/explain")
+async def explain(request_body: ExplainRequest):
+    if not request_body.error_message.strip():
         raise HTTPException(
             status_code=400,
             detail="Please enter an error message.",
         )
 
-    session: ClientSession | None = getattr(
-        request.app.state,
-        "mcp_session",
-        None,
-    )
-
-    if session is None:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "The MCP service is temporarily unavailable. "
-                "Please try again later."
-            ),
-        )
-
     try:
-        result = await session.call_tool(
-            "explain_error",
-            {"error_message": error_message},
-        )
+        # Create a fresh connection and session for this request.
+        async with streamable_http_client(MCP_URL) as (
+            read_stream,
+            write_stream,
+        ):
+            async with ClientSession(
+                read_stream,
+                write_stream,
+            ) as session:
+                await session.initialize()
 
-        if result.is_error:
-            logger.error("MCP explain_error tool returned an error.")
+                result = await session.call_tool(
+                    "explain_error",
+                    {
+                        "error_message": request_body.error_message,
+                    },
+                )
 
-            raise HTTPException(
-                status_code=502,
-                detail="The MCP tool could not process this error.",
-            )
+                if result.is_error:
+                    raise HTTPException(
+                        status_code=502,
+                        detail="The MCP tool could not process this error.",
+                    )
 
-        explanation = "\n".join(
-            item.text
-            for item in result.content
-            if getattr(item, "text", None)
-        )
+                explanation = "\n".join(
+                    item.text
+                    for item in result.content
+                    if getattr(item, "text", None)
+                )
 
-        if not explanation:
-            raise HTTPException(
-                status_code=502,
-                detail="The MCP tool returned an empty explanation.",
-            )
-
-        return {
-            "explanation": explanation,
-        }
+                return {"explanation": explanation}
 
     except HTTPException:
         raise
-
     except Exception as exc:
-        logger.exception("MCP tool call failed.")
-
+        logger.exception("MCP connection or tool call failed")
         raise HTTPException(
             status_code=502,
-            detail="Failed to communicate with the MCP service.",
+            detail="Failed to communicate with the MCP service. Please try again.",
         ) from exc
 
 
