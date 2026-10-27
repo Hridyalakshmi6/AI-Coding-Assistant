@@ -1,9 +1,8 @@
 
-import asyncio
 import logging
 import os
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from mcp import ClientSession
@@ -22,7 +21,7 @@ MCP_URL = os.environ.get(
     "http://127.0.0.1:8000/mcp",
 )
 
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "").rstrip("/")
 
 CORS_ORIGINS = [
     "http://localhost:5173",
@@ -35,85 +34,10 @@ if FRONTEND_URL:
 
 
 # --------------------------------------------------
-# MCP connection and application lifecycle
-# --------------------------------------------------
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """
-    Connect to the MCP server with retries.
-
-    The API starts only after MCP initializes successfully.
-    Temporary connection failures are retried.
-    """
-
-    app.state.mcp_session = None
-
-    max_attempts = 5
-
-    for attempt in range(1, max_attempts + 1):
-        try:
-            logger.info(
-                "Connecting to MCP server (attempt %s/%s)",
-                attempt,
-                max_attempts,
-            )
-
-            async with streamable_http_client(MCP_URL) as (
-                read_stream,
-                write_stream,
-            ):
-                async with ClientSession(
-                    read_stream,
-                    write_stream,
-                ) as session:
-
-                    await session.initialize()
-
-                    app.state.mcp_session = session
-
-                    logger.info(
-                        "MCP session initialized successfully."
-                    )
-
-                    try:
-                        yield
-                    finally:
-                        app.state.mcp_session = None
-
-                    return
-
-        except asyncio.CancelledError:
-            raise
-
-        except Exception:
-            logger.exception(
-                "MCP connection failed (attempt %s/%s)",
-                attempt,
-                max_attempts,
-            )
-
-            if attempt == max_attempts:
-                logger.critical(
-                    "Could not connect to MCP server after %s attempts.",
-                    max_attempts,
-                )
-                raise
-
-            delay = min(2 ** attempt, 16)
-
-            logger.info("Retrying MCP connection in %s seconds.", delay)
-
-            await asyncio.sleep(delay)
-
-
-# --------------------------------------------------
 # FastAPI application
 # --------------------------------------------------
 
-app = FastAPI(
-    title="DevFlow API"
-)
+app = FastAPI(title="DevFlow API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -138,16 +62,9 @@ class ExplainRequest(BaseModel):
 
 @app.get("/api/health")
 async def health():
-    session_available = getattr(
-        app.state,
-        "mcp_session",
-        None,
-    ) is not None
-
     return {
-        "status": "ok" if session_available else "degraded",
+        "status": "ok",
         "service": "DevFlow API",
-        "mcp_connected": session_available,
     }
 
 
@@ -155,17 +72,20 @@ async def health():
 # Explain error endpoint
 # --------------------------------------------------
 
-
 @app.post("/api/explain")
 async def explain(request_body: ExplainRequest):
-    if not request_body.error_message.strip():
+    error_message = request_body.error_message.strip()
+
+    if not error_message:
         raise HTTPException(
             status_code=400,
             detail="Please enter an error message.",
         )
 
     try:
-        # Create a fresh connection and session for this request.
+        logger.info("Opening a new MCP connection.")
+
+        # Create a fresh MCP connection for this request.
         async with streamable_http_client(MCP_URL) as (
             read_stream,
             write_stream,
@@ -174,36 +94,59 @@ async def explain(request_body: ExplainRequest):
                 read_stream,
                 write_stream,
             ) as session:
+
+                # Initialize the MCP session.
                 await session.initialize()
 
+                logger.info("MCP session initialized successfully.")
+
+                # Call the registered MCP tool.
                 result = await session.call_tool(
                     "explain_error",
                     {
-                        "error_message": request_body.error_message,
+                        "error_message": error_message,
                     },
                 )
 
                 if result.is_error:
+                    logger.error("The explain_error MCP tool returned an error.")
+
                     raise HTTPException(
                         status_code=502,
                         detail="The MCP tool could not process this error.",
                     )
 
+                # Extract text from the MCP response.
                 explanation = "\n".join(
                     item.text
                     for item in result.content
                     if getattr(item, "text", None)
                 )
 
-                return {"explanation": explanation}
+                if not explanation.strip():
+                    raise HTTPException(
+                        status_code=502,
+                        detail="The MCP service returned an empty explanation.",
+                    )
+
+                logger.info("Error explanation generated successfully.")
+
+                return {
+                    "explanation": explanation,
+                }
 
     except HTTPException:
         raise
+
     except Exception as exc:
-        logger.exception("MCP connection or tool call failed")
+        logger.exception("MCP connection or tool call failed.")
+
         raise HTTPException(
             status_code=502,
-            detail="Failed to communicate with the MCP service. Please try again.",
+            detail=(
+                "Failed to communicate with the MCP service. "
+                "Please try again."
+            ),
         ) from exc
 
 
