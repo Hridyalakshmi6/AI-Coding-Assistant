@@ -15,6 +15,8 @@ from mcp.client.streamable_http import streamable_http_client
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+# Allow only one MCP request at a time
+MCP_SEMAPHORE = asyncio.Semaphore(1)
 
 MCP_URL = os.environ.get(
     "MCP_URL",
@@ -83,73 +85,84 @@ async def explain(request_body: ExplainRequest):
             detail="Please enter an error message.",
         )
 
-    for attempt in range(1, 4):
-        try:
-            logger.info(
-                "MCP request attempt %s/3",
-                attempt,
-            )
+    # Prevent overlapping requests to the MCP service
+    async with MCP_SEMAPHORE:
+        for attempt in range(1, 4):
+            try:
+                logger.info(
+                    "MCP request attempt %s/3",
+                    attempt,
+                )
 
-            async with streamable_http_client(MCP_URL) as (
-                read_stream,
-                write_stream,
-            ):
-                async with ClientSession(
+                async with streamable_http_client(MCP_URL) as (
                     read_stream,
                     write_stream,
-                ) as session:
-                    await session.initialize()
+                ):
+                    async with ClientSession(
+                        read_stream,
+                        write_stream,
+                    ) as session:
+                        await session.initialize()
 
-                    result = await session.call_tool(
-                        "explain_error",
-                        {"error_message": error_message},
-                    )
-
-                    if result.is_error:
-                        raise HTTPException(
-                            status_code=502,
-                            detail="The MCP tool could not process this error.",
+                        result = await session.call_tool(
+                            "explain_error",
+                            {"error_message": error_message},
                         )
 
-                    explanation = "\n".join(
-                        item.text
-                        for item in result.content
-                        if getattr(item, "text", None)
-                    )
+                        if result.is_error:
+                            raise HTTPException(
+                                status_code=502,
+                                detail=(
+                                    "The MCP tool could not "
+                                    "process this error."
+                                ),
+                            )
 
-                    if not explanation.strip():
-                        raise HTTPException(
-                            status_code=502,
-                            detail="The MCP service returned an empty explanation.",
+                        explanation = "\n".join(
+                            item.text
+                            for item in result.content
+                            if getattr(item, "text", None)
                         )
 
-                    return {"explanation": explanation}
+                        if not explanation.strip():
+                            raise HTTPException(
+                                status_code=502,
+                                detail=(
+                                    "The MCP service returned "
+                                    "an empty explanation."
+                                ),
+                            )
 
-        except HTTPException:
-            raise
+                        return {"explanation": explanation}
 
-        except Exception as exc:
-            logger.exception(
-                "MCP attempt %s/3 failed",
-                attempt,
-            )
+            except HTTPException:
+                raise
 
-            if attempt == 3:
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        "The MCP service is temporarily unavailable. "
-                        "Please try again shortly."
-                    ),
-                ) from exc
+            except Exception as exc:
+                logger.warning(
+                    "MCP attempt %s/3 failed: %s",
+                    attempt,
+                    type(exc).__name__,
+                )
 
-            await asyncio.sleep(2 ** attempt)
+                if attempt == 3:
+                    logger.exception(
+                        "All MCP attempts failed"
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            "The MCP service is temporarily "
+                            "unavailable. Please try again shortly."
+                        ),
+                    ) from exc
+
+                await asyncio.sleep(2 ** attempt)
 
     raise HTTPException(
         status_code=502,
         detail="The MCP service is temporarily unavailable.",
     )
-
 
 # --------------------------------------------------
 # Local development entry point
